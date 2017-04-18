@@ -1,0 +1,1035 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="1200" height="354" onload="init(evt)" viewBox="0 0 1200 354" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<defs >
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#eeeeee" offset="5%" />
+		<stop stop-color="#eeeeb0" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	.func_g:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	var details, searchbtn, matchedtxt, svg;
+	function init(evt) { 
+		details = document.getElementById("details").firstChild; 
+		searchbtn = document.getElementById("search");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+	}
+
+	// mouse-over for info
+	function s(node) {		// show
+		info = g_to_text(node);
+		details.nodeValue = "Function: " + info;
+	}
+	function c() {			// clear
+		details.nodeValue = ' ';
+	}
+
+	// ctrl-F for search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+	})
+
+	// functions
+	function find_child(parent, name, attr) {
+		var children = parent.childNodes;
+		for (var i=0; i<children.length;i++) {
+			if (children[i].tagName == name)
+				return (attr != undefined) ? children[i].attributes[attr].value : children[i];
+		}
+		return;
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_"+attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_"+attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_"+attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		if (func != null)
+			func = func.replace(/ .*/, "");
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes["width"].value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)/,"");
+		t.attributes["x"].value = parseFloat(r.attributes["x"].value) +3;
+		
+		// Smaller than this size won't fit anything
+		if (w < 2*12*0.59) {
+			t.textContent = "";
+			return;
+		}
+		
+		t.textContent = txt;
+		// Fit in full text width
+		if (/^ *$/.test(txt) || t.getSubStringLength(0, txt.length) < w)
+			return;
+		
+		for (var x=txt.length-2; x>0; x--) {
+			if (t.getSubStringLength(0, x+2) <= w) { 
+				t.textContent = txt.substring(0,x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for(var i=0, c=e.childNodes; i<c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes["x"] != undefined) {
+				orig_save(e, "x");
+				e.attributes["x"].value = (parseFloat(e.attributes["x"].value) - x - 10) * ratio + 10;
+				if(e.tagName == "text") e.attributes["x"].value = find_child(e.parentNode, "rect", "x") + 3;
+			}
+			if (e.attributes["width"] != undefined) {
+				orig_save(e, "width");
+				e.attributes["width"].value = parseFloat(e.attributes["width"].value) * ratio;
+			}
+		}
+		
+		if (e.childNodes == undefined) return;
+		for(var i=0, c=e.childNodes; i<c.length; i++) {
+			zoom_child(c[i], x-10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes["x"] != undefined) {
+				orig_save(e, "x");
+				e.attributes["x"].value = 10;
+			}
+			if (e.attributes["width"] != undefined) {
+				orig_save(e, "width");
+				e.attributes["width"].value = parseInt(svg.width.baseVal.value) - (10*2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for(var i=0, c=e.childNodes; i<c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) { 
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr["width"].value);
+		var xmin = parseFloat(attr["x"].value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr["y"].value);
+		var ratio = (svg.width.baseVal.value - 2*10) / width;
+		
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+		
+		var unzoombtn = document.getElementById("unzoom");
+		unzoombtn.style["opacity"] = "1.0";
+		
+		var el = document.getElementsByTagName("g");
+		for(var i=0;i<el.length;i++){
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a["x"].value);
+			var ew = parseFloat(a["width"].value);
+			// Is it an ancestor
+			if (0 == 0) {
+				var upstack = parseFloat(a["y"].value) > ymin;
+			} else {
+				var upstack = parseFloat(a["y"].value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.style["opacity"] = "0.5";
+					zoom_parent(e);
+					e.onclick = function(e){unzoom(); zoom(this);};
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.style["display"] = "none";
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.style["display"] = "none";
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					e.onclick = function(e){zoom(this);};
+					update_text(e);
+				}
+			}
+		}
+	}
+	function unzoom() {
+		var unzoombtn = document.getElementById("unzoom");
+		unzoombtn.style["opacity"] = "0.0";
+		
+		var el = document.getElementsByTagName("g");
+		for(i=0;i<el.length;i++) {
+			el[i].style["display"] = "block";
+			el[i].style["opacity"] = "1";
+			zoom_reset(el[i]);
+			update_text(el[i]);
+		}
+	}	
+
+	// search
+	function reset_search() {
+		var el = document.getElementsByTagName("rect");
+		for (var i=0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)", "");
+			if (term != null) {
+				search(term)
+			}
+		} else {
+			reset_search();
+			searching = 0;
+			searchbtn.style["opacity"] = "0.1";
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.style["opacity"] = "0.0";
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		var re = new RegExp(term);
+		var el = document.getElementsByTagName("g");
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			if (e.attributes["class"].value != "func_g")
+				continue;
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (rect == null) {
+				// the rect might be wrapped in an anchor
+				// if nameattr href is being used
+				if (rect = find_child(e, "a")) {
+				    rect = find_child(r, "rect");
+				}
+			}
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes["width"].value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes["x"].value);
+				orig_save(rect, "fill");
+				rect.attributes["fill"].value =
+				    "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+
+		searchbtn.style["opacity"] = "1.0";
+		searchbtn.firstChild.nodeValue = "Reset Search"
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+				return a - b;
+			if (a < b || a > b)
+				return a - b;
+			return matches[b] - matches[a];
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.style["opacity"] = "1.0";
+		pct = 100 * count / maxwidth;
+		if (pct == 100)
+			pct = "100"
+		else
+			pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+	function searchover(e) {
+		searchbtn.style["opacity"] = "1.0";
+	}
+	function searchout(e) {
+		if (searching) {
+			searchbtn.style["opacity"] = "1.0";
+		} else {
+			searchbtn.style["opacity"] = "0.1";
+		}
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="1200.0" height="354.0" fill="url(#background)"  />
+<text text-anchor="middle" x="600.00" y="24" font-size="17" font-family="Verdana" fill="rgb(0,0,0)"  >Flame Graph</text>
+<text text-anchor="" x="10.00" y="337" font-size="12" font-family="Verdana" fill="rgb(0,0,0)" id="details" > </text>
+<text text-anchor="" x="10.00" y="24" font-size="12" font-family="Verdana" fill="rgb(0,0,0)" id="unzoom" onclick="unzoom()" style="opacity:0.0;cursor:pointer" >Reset Zoom</text>
+<text text-anchor="" x="1090.00" y="24" font-size="12" font-family="Verdana" fill="rgb(0,0,0)" id="search" onmouseover="searchover()" onmouseout="searchout()" onclick="search_prompt()" style="opacity:0.1;cursor:pointer" >Search</text>
+<text text-anchor="" x="1090.00" y="337" font-size="12" font-family="Verdana" fill="rgb(0,0,0)" id="matched" > </text>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_deliver_frame_to_channel(pika.connection) (1,161 samples, 8.48%)</title><rect x="374.1" y="129" width="100.1" height="15.0" fill="rgb(208,7,54)" rx="2" ry="2" />
+<text text-anchor="" x="377.14" y="139.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_deliver_fra..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ready(gevent.greenlet) (254 samples, 1.86%)</title><rect x="306.5" y="113" width="21.9" height="15.0" fill="rgb(215,83,34)" rx="2" ry="2" />
+<text text-anchor="" x="309.49" y="123.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >r..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_on_data_available(pika.connection) (6,336 samples, 46.27%)</title><rect x="338.2" y="161" width="546.0" height="15.0" fill="rgb(220,55,46)" rx="2" ry="2" />
+<text text-anchor="" x="341.20" y="171.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_on_data_available(pika.connection)</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>join(gevent.pool) (663 samples, 4.84%)</title><rect x="125.4" y="193" width="57.2" height="15.0" fill="rgb(236,123,46)" rx="2" ry="2" />
+<text text-anchor="" x="128.43" y="203.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >join(g..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_links(gevent.greenlet) (35 samples, 0.26%)</title><rect x="303.5" y="97" width="3.0" height="15.0" fill="rgb(233,164,0)" rx="2" ry="2" />
+<text text-anchor="" x="306.47" y="107.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>connection(pika.adapters.blocking_connection) (44 samples, 0.32%)</title><rect x="432.0" y="49" width="3.8" height="15.0" fill="rgb(228,135,45)" rx="2" ry="2" />
+<text text-anchor="" x="434.97" y="59.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>cancel(gevent.timeout) (7 samples, 0.05%)</title><rect x="152.9" y="129" width="0.6" height="15.0" fill="rgb(220,0,7)" rx="2" ry="2" />
+<text text-anchor="" x="155.92" y="139.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>poll(pika.adapters.select_connection) (5 samples, 0.04%)</title><rect x="10.1" y="209" width="0.4" height="15.0" fill="rgb(212,206,6)" rx="2" ry="2" />
+<text text-anchor="" x="13.09" y="219.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>is_open(pika.channel) (46 samples, 0.34%)</title><rect x="1116.2" y="225" width="4.0" height="15.0" fill="rgb(207,96,30)" rx="2" ry="2" />
+<text text-anchor="" x="1119.23" y="235.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>wait(gevent.event) (2 samples, 0.01%)</title><rect x="884.7" y="193" width="0.1" height="15.0" fill="rgb(215,101,8)" rx="2" ry="2" />
+<text text-anchor="" x="887.67" y="203.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_check_and_notify(gevent.event) (16 samples, 0.12%)</title><rect x="157.4" y="113" width="1.4" height="15.0" fill="rgb(252,20,34)" rx="2" ry="2" />
+<text text-anchor="" x="160.40" y="123.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>wrapper(pika.callback) (3 samples, 0.02%)</title><rect x="10.2" y="81" width="0.2" height="15.0" fill="rgb(210,174,25)" rx="2" ry="2" />
+<text text-anchor="" x="13.17" y="91.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__init__(pika.frame) (109 samples, 0.80%)</title><rect x="1007.5" y="193" width="9.4" height="15.0" fill="rgb(230,21,28)" rx="2" ry="2" />
+<text text-anchor="" x="1010.47" y="203.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>poll(pika.adapters.select_connection) (2 samples, 0.01%)</title><rect x="10.6" y="209" width="0.2" height="15.0" fill="rgb(225,186,17)" rx="2" ry="2" />
+<text text-anchor="" x="13.60" y="219.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_send_method(pika.channel) (1,608 samples, 11.74%)</title><rect x="977.7" y="225" width="138.5" height="15.0" fill="rgb(229,86,51)" rx="2" ry="2" />
+<text text-anchor="" x="980.65" y="235.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_send_method(pika..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_discard(gevent.pool) (330 samples, 2.41%)</title><rect x="1161.4" y="257" width="28.4" height="15.0" fill="rgb(218,167,26)" rx="2" ry="2" />
+<text text-anchor="" x="1164.39" y="267.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_d..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_send_frame(pika.connection) (1,153 samples, 8.42%)</title><rect x="1016.9" y="193" width="99.3" height="15.0" fill="rgb(227,14,45)" rx="2" ry="2" />
+<text text-anchor="" x="1019.87" y="203.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_send_frame(..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>start(gevent.greenlet) (105 samples, 0.77%)</title><rect x="328.4" y="161" width="9.0" height="15.0" fill="rgb(219,211,16)" rx="2" ry="2" />
+<text text-anchor="" x="331.38" y="171.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_process_fd_events(pika.adapters.select_connection) (6,342 samples, 46.32%)</title><rect x="337.8" y="209" width="546.5" height="15.0" fill="rgb(237,27,28)" rx="2" ry="2" />
+<text text-anchor="" x="340.77" y="219.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_process_fd_events(pika.adapters.select_connection)</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>(lambda)(pika.adapters.blocking_connection) (16 samples, 0.12%)</title><rect x="951.5" y="177" width="1.4" height="15.0" fill="rgb(243,101,40)" rx="2" ry="2" />
+<text text-anchor="" x="954.54" y="187.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_handle_content_frame(pika.channel) (2 samples, 0.01%)</title><rect x="959.6" y="97" width="0.1" height="15.0" fill="rgb(225,58,34)" rx="2" ry="2" />
+<text text-anchor="" x="962.56" y="107.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>start_consuming(pika.adapters.blocking_connection) (9,418 samples, 68.78%)</title><rect x="73.3" y="273" width="811.6" height="15.0" fill="rgb(227,94,35)" rx="2" ry="2" />
+<text text-anchor="" x="76.29" y="283.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >start_consuming(pika.adapters.blocking_connection)</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_reset(pika.channel) (59 samples, 0.43%)</title><rect x="464.8" y="49" width="5.1" height="15.0" fill="rgb(250,224,40)" rx="2" ry="2" />
+<text text-anchor="" x="467.80" y="59.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>(lambda)(pika.adapters.blocking_connection) (252 samples, 1.84%)</title><rect x="935.6" y="209" width="21.7" height="15.0" fill="rgb(251,84,33)" rx="2" ry="2" />
+<text text-anchor="" x="938.60" y="219.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >(..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>decode(json.decoder) (619 samples, 4.52%)</title><rect x="188.8" y="177" width="53.3" height="15.0" fill="rgb(210,9,12)" rx="2" ry="2" />
+<text text-anchor="" x="191.77" y="187.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >decod..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_process_frame(pika.connection) (2,493 samples, 18.21%)</title><rect x="355.8" y="145" width="214.8" height="15.0" fill="rgb(248,122,32)" rx="2" ry="2" />
+<text text-anchor="" x="358.78" y="155.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_process_frame(pika.connecti..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_process_fd_events(pika.adapters.select_connection) (20 samples, 0.15%)</title><rect x="959.4" y="193" width="1.7" height="15.0" fill="rgb(229,74,36)" rx="2" ry="2" />
+<text text-anchor="" x="962.38" y="203.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>decode(pika.spec) (733 samples, 5.35%)</title><rect x="692.1" y="113" width="63.2" height="15.0" fill="rgb(216,187,28)" rx="2" ry="2" />
+<text text-anchor="" x="695.14" y="123.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >decode..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>unlink(gevent.event) (40 samples, 0.29%)</title><rect x="177.9" y="129" width="3.5" height="15.0" fill="rgb(244,223,18)" rx="2" ry="2" />
+<text text-anchor="" x="180.91" y="139.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_on_consumer_message_delivery(pika.adapters.blocking_connection) (267 samples, 1.95%)</title><rect x="412.7" y="81" width="23.1" height="15.0" fill="rgb(209,46,33)" rx="2" ry="2" />
+<text text-anchor="" x="415.75" y="91.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>wrapper(pika.callback) (860 samples, 6.28%)</title><rect x="485.7" y="97" width="74.2" height="15.0" fill="rgb(231,151,46)" rx="2" ry="2" />
+<text text-anchor="" x="488.74" y="107.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >wrapper(..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_handle_events(pika.adapters.base_connection) (4 samples, 0.03%)</title><rect x="10.1" y="177" width="0.3" height="15.0" fill="rgb(235,96,12)" rx="2" ry="2" />
+<text text-anchor="" x="13.09" y="187.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_handle_content_frame(pika.channel) (990 samples, 7.23%)</title><rect x="388.9" y="113" width="85.3" height="15.0" fill="rgb(222,22,51)" rx="2" ry="2" />
+<text text-anchor="" x="391.88" y="123.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_handle_co..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_notify_links(gevent.greenlet) (478 samples, 3.49%)</title><rect x="1148.6" y="273" width="41.2" height="15.0" fill="rgb(248,143,38)" rx="2" ry="2" />
+<text text-anchor="" x="1151.63" y="283.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_no..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ready(pika.adapters.blocking_connection) (38 samples, 0.28%)</title><rect x="954.0" y="193" width="3.3" height="15.0" fill="rgb(225,113,54)" rx="2" ry="2" />
+<text text-anchor="" x="957.04" y="203.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>all (13,692 samples, 100%)</title><rect x="10.0" y="305" width="1180.0" height="15.0" fill="rgb(210,223,27)" rx="2" ry="2" />
+<text text-anchor="" x="13.00" y="315.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_handle_events(pika.adapters.base_connection) (20 samples, 0.15%)</title><rect x="959.4" y="177" width="1.7" height="15.0" fill="rgb(212,47,9)" rx="2" ry="2" />
+<text text-anchor="" x="962.38" y="187.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_process_callbacks(pika.connection) (4 samples, 0.03%)</title><rect x="10.1" y="113" width="0.3" height="15.0" fill="rgb(215,109,14)" rx="2" ry="2" />
+<text text-anchor="" x="13.09" y="123.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>canonical_str(pika.compat) (47 samples, 0.34%)</title><rect x="551.3" y="65" width="4.1" height="15.0" fill="rgb(213,66,12)" rx="2" ry="2" />
+<text text-anchor="" x="554.32" y="75.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_report_result(gevent.greenlet) (228 samples, 1.67%)</title><rect x="50.3" y="273" width="19.6" height="15.0" fill="rgb(233,65,25)" rx="2" ry="2" />
+<text text-anchor="" x="53.28" y="283.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>is_closed(pika.connection) (24 samples, 0.18%)</title><rect x="957.3" y="209" width="2.1" height="15.0" fill="rgb(216,81,48)" rx="2" ry="2" />
+<text text-anchor="" x="960.32" y="219.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>confirm_delivery(pika.adapters.blocking_connection) (2 samples, 0.01%)</title><rect x="10.9" y="257" width="0.1" height="15.0" fill="rgb(245,140,49)" rx="2" ry="2" />
+<text text-anchor="" x="13.86" y="267.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_discard(gevent.pool) (258 samples, 1.88%)</title><rect x="1167.6" y="241" width="22.2" height="15.0" fill="rgb(209,27,19)" rx="2" ry="2" />
+<text text-anchor="" x="1170.59" y="251.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__started_but_aborted(gevent.greenlet) (80 samples, 0.58%)</title><rect x="321.5" y="81" width="6.9" height="15.0" fill="rgb(253,111,21)" rx="2" ry="2" />
+<text text-anchor="" x="324.48" y="91.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__init__(gevent.greenlet) (282 samples, 2.06%)</title><rect x="247.3" y="177" width="24.3" height="15.0" fill="rgb(234,172,51)" rx="2" ry="2" />
+<text text-anchor="" x="250.28" y="187.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_on_data_available(pika.connection) (4 samples, 0.03%)</title><rect x="10.1" y="145" width="0.3" height="15.0" fill="rgb(249,117,8)" rx="2" ry="2" />
+<text text-anchor="" x="13.09" y="155.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>exchange_declare(pika.adapters.blocking_connection) (2 samples, 0.01%)</title><rect x="11.0" y="257" width="0.2" height="15.0" fill="rgb(213,143,14)" rx="2" ry="2" />
+<text text-anchor="" x="14.03" y="267.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>clear(gevent.event) (20 samples, 0.15%)</title><rect x="290.4" y="129" width="1.7" height="15.0" fill="rgb(217,115,52)" rx="2" ry="2" />
+<text text-anchor="" x="293.37" y="139.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_handle_body_frame(pika.channel) (212 samples, 1.55%)</title><rect x="451.6" y="81" width="18.3" height="15.0" fill="rgb(244,87,4)" rx="2" ry="2" />
+<text text-anchor="" x="454.61" y="91.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>kwargs(gevent.greenlet) (37 samples, 0.27%)</title><rect x="69.9" y="273" width="3.2" height="15.0" fill="rgb(235,177,5)" rx="2" ry="2" />
+<text text-anchor="" x="72.93" y="283.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_process_frame(pika.connection) (4 samples, 0.03%)</title><rect x="10.1" y="129" width="0.3" height="15.0" fill="rgb(209,168,53)" rx="2" ry="2" />
+<text text-anchor="" x="13.09" y="139.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_read_frame(pika.connection) (10 samples, 0.07%)</title><rect x="959.8" y="129" width="0.9" height="15.0" fill="rgb(230,198,2)" rx="2" ry="2" />
+<text text-anchor="" x="962.81" y="139.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>wait(gevent.event) (602 samples, 4.40%)</title><rect x="130.7" y="177" width="51.9" height="15.0" fill="rgb(206,202,2)" rx="2" ry="2" />
+<text text-anchor="" x="133.68" y="187.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >wait(..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__init__(pika.adapters.blocking_connection) (6 samples, 0.04%)</title><rect x="10.0" y="257" width="0.5" height="15.0" fill="rgb(254,93,3)" rx="2" ry="2" />
+<text text-anchor="" x="13.00" y="267.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_flush_output(pika.adapters.blocking_connection) (2 samples, 0.01%)</title><rect x="10.6" y="241" width="0.2" height="15.0" fill="rgb(207,132,43)" rx="2" ry="2" />
+<text text-anchor="" x="13.60" y="251.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>start(gevent.pool) (764 samples, 5.58%)</title><rect x="271.6" y="177" width="65.8" height="15.0" fill="rgb(227,145,18)" rx="2" ry="2" />
+<text text-anchor="" x="274.59" y="187.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >start(g..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_wait_return_value(gevent.event) (7 samples, 0.05%)</title><rect x="181.4" y="145" width="0.6" height="15.0" fill="rgb(223,86,31)" rx="2" ry="2" />
+<text text-anchor="" x="184.36" y="155.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_flush_output(pika.adapters.blocking_connection) (594 samples, 4.34%)</title><rect x="914.6" y="241" width="51.2" height="15.0" fill="rgb(239,224,47)" rx="2" ry="2" />
+<text text-anchor="" x="917.57" y="251.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_flus..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_flush_output(pika.adapters.blocking_connection) (6,352 samples, 46.39%)</title><rect x="337.5" y="241" width="547.4" height="15.0" fill="rgb(208,8,40)" rx="2" ry="2" />
+<text text-anchor="" x="340.51" y="251.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_flush_output(pika.adapters.blocking_connection)</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_trim_frame_buffer(pika.connection) (5 samples, 0.04%)</title><rect x="960.7" y="129" width="0.4" height="15.0" fill="rgb(205,63,32)" rx="2" ry="2" />
+<text text-anchor="" x="963.68" y="139.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>dead(gevent.greenlet) (234 samples, 1.71%)</title><rect x="308.2" y="97" width="20.2" height="15.0" fill="rgb(210,151,6)" rx="2" ry="2" />
+<text text-anchor="" x="311.21" y="107.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>get_hub(gevent.hub) (53 samples, 0.39%)</title><rect x="267.0" y="161" width="4.6" height="15.0" fill="rgb(250,200,4)" rx="2" ry="2" />
+<text text-anchor="" x="270.02" y="171.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>decode_frame(pika.frame) (2,073 samples, 15.14%)</title><rect x="576.7" y="129" width="178.6" height="15.0" fill="rgb(222,131,40)" rx="2" ry="2" />
+<text text-anchor="" x="579.66" y="139.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >decode_frame(pika.frame)</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__cancel_start(gevent.greenlet) (47 samples, 0.34%)</title><rect x="46.2" y="273" width="4.1" height="15.0" fill="rgb(211,187,3)" rx="2" ry="2" />
+<text text-anchor="" x="49.23" y="283.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_handle_write(pika.adapters.base_connection) (289 samples, 2.11%)</title><rect x="1035.3" y="161" width="24.9" height="15.0" fill="rgb(224,194,51)" rx="2" ry="2" />
+<text text-anchor="" x="1038.31" y="171.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>poll(gevent.select) (6 samples, 0.04%)</title><rect x="884.3" y="209" width="0.5" height="15.0" fill="rgb(227,68,30)" rx="2" ry="2" />
+<text text-anchor="" x="887.32" y="219.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_on_connection_tune(pika.connection) (2 samples, 0.01%)</title><rect x="10.3" y="49" width="0.1" height="15.0" fill="rgb(221,70,48)" rx="2" ry="2" />
+<text text-anchor="" x="13.26" y="59.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>add(gevent.pool) (613 samples, 4.48%)</title><rect x="275.6" y="161" width="52.8" height="15.0" fill="rgb(237,53,12)" rx="2" ry="2" />
+<text text-anchor="" x="278.55" y="171.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >add(g..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>loads(json) (691 samples, 5.05%)</title><rect x="182.6" y="193" width="59.5" height="15.0" fill="rgb(244,147,25)" rx="2" ry="2" />
+<text text-anchor="" x="185.56" y="203.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >loads(..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>channel_number(pika.adapters.blocking_connection) (28 samples, 0.20%)</title><rect x="429.6" y="49" width="2.4" height="15.0" fill="rgb(214,84,21)" rx="2" ry="2" />
+<text text-anchor="" x="432.55" y="59.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_start_new_or_dummy(gevent.timeout) (2 samples, 0.01%)</title><rect x="884.7" y="145" width="0.1" height="15.0" fill="rgb(209,149,28)" rx="2" ry="2" />
+<text text-anchor="" x="887.67" y="155.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_handle_read(pika.adapters.base_connection) (6,338 samples, 46.29%)</title><rect x="338.1" y="177" width="546.2" height="15.0" fill="rgb(212,95,16)" rx="2" ry="2" />
+<text text-anchor="" x="341.12" y="187.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_handle_read(pika.adapters.base_connection)</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>elapsed (103 samples, 0.75%)</title><rect x="11.6" y="289" width="8.9" height="15.0" fill="rgb(233,53,9)" rx="2" ry="2" />
+<text text-anchor="" x="14.55" y="299.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_flush_output(pika.adapters.blocking_connection) (396 samples, 2.89%)</title><rect x="928.2" y="225" width="34.1" height="15.0" fill="rgb(250,221,18)" rx="2" ry="2" />
+<text text-anchor="" x="931.19" y="235.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_f..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>is_ready(pika.adapters.blocking_connection) (13 samples, 0.09%)</title><rect x="952.9" y="177" width="1.1" height="15.0" fill="rgb(235,159,28)" rx="2" ry="2" />
+<text text-anchor="" x="955.92" y="187.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>poll(pika.adapters.select_connection) (2 samples, 0.01%)</title><rect x="11.0" y="209" width="0.2" height="15.0" fill="rgb(248,187,4)" rx="2" ry="2" />
+<text text-anchor="" x="14.03" y="219.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>poll(pika.adapters.select_connection) (2 samples, 0.01%)</title><rect x="11.2" y="209" width="0.2" height="15.0" fill="rgb(231,218,54)" rx="2" ry="2" />
+<text text-anchor="" x="14.21" y="219.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_send_method(pika.connection) (1,548 samples, 11.31%)</title><rect x="982.8" y="209" width="133.4" height="15.0" fill="rgb(223,212,16)" rx="2" ry="2" />
+<text text-anchor="" x="985.82" y="219.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_send_method(pik..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_has_pending_callbacks(pika.connection) (909 samples, 6.64%)</title><rect x="481.5" y="113" width="78.4" height="15.0" fill="rgb(230,212,51)" rx="2" ry="2" />
+<text text-anchor="" x="484.52" y="123.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_has_pend..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__init__(pika.spec) (212 samples, 1.55%)</title><rect x="673.9" y="113" width="18.2" height="15.0" fill="rgb(211,16,6)" rx="2" ry="2" />
+<text text-anchor="" x="676.87" y="123.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>(genexpr)(pika.adapters.blocking_connection) (62 samples, 0.45%)</title><rect x="948.7" y="193" width="5.3" height="15.0" fill="rgb(226,50,51)" rx="2" ry="2" />
+<text text-anchor="" x="951.70" y="203.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__init__(pika.frame) (2 samples, 0.01%)</title><rect x="960.1" y="97" width="0.1" height="15.0" fill="rgb(208,120,25)" rx="2" ry="2" />
+<text text-anchor="" x="963.07" y="107.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>run(gevent.hub) (810 samples, 5.92%)</title><rect x="1120.2" y="289" width="69.8" height="15.0" fill="rgb(240,11,49)" rx="2" ry="2" />
+<text text-anchor="" x="1123.19" y="299.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >run(gev..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>spawn(gevent.pool) (1,106 samples, 8.08%)</title><rect x="242.1" y="193" width="95.3" height="15.0" fill="rgb(228,21,31)" rx="2" ry="2" />
+<text text-anchor="" x="245.11" y="203.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >spawn(geven..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>decode_frame(pika.frame) (10 samples, 0.07%)</title><rect x="959.8" y="113" width="0.9" height="15.0" fill="rgb(209,53,35)" rx="2" ry="2" />
+<text text-anchor="" x="962.81" y="123.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_wait(gevent.event) (2 samples, 0.01%)</title><rect x="884.7" y="177" width="0.1" height="15.0" fill="rgb(226,219,34)" rx="2" ry="2" />
+<text text-anchor="" x="887.67" y="187.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_add_pending_event(pika.adapters.blocking_connection) (154 samples, 1.12%)</title><rect x="422.5" y="65" width="13.3" height="15.0" fill="rgb(228,14,30)" rx="2" ry="2" />
+<text text-anchor="" x="425.49" y="75.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_process_io_for_connection_setup(pika.adapters.blocking_connection) (5 samples, 0.04%)</title><rect x="10.1" y="241" width="0.4" height="15.0" fill="rgb(233,141,17)" rx="2" ry="2" />
+<text text-anchor="" x="13.09" y="251.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__never_started_or_killed(gevent.greenlet) (42 samples, 0.31%)</title><rect x="324.8" y="65" width="3.6" height="15.0" fill="rgb(228,193,25)" rx="2" ry="2" />
+<text text-anchor="" x="327.76" y="75.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__init__(pika.spec) (61 samples, 0.45%)</title><rect x="972.4" y="225" width="5.3" height="15.0" fill="rgb(242,224,30)" rx="2" ry="2" />
+<text text-anchor="" x="975.40" y="235.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>is_set(gevent.event) (7 samples, 0.05%)</title><rect x="182.0" y="145" width="0.6" height="15.0" fill="rgb(223,11,21)" rx="2" ry="2" />
+<text text-anchor="" x="184.96" y="155.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>start_new(gevent.timeout) (2 samples, 0.01%)</title><rect x="884.7" y="129" width="0.1" height="15.0" fill="rgb(229,188,17)" rx="2" ry="2" />
+<text text-anchor="" x="887.67" y="139.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>run(gevent.greenlet) (12,761 samples, 93.20%)</title><rect x="20.5" y="289" width="1099.7" height="15.0" fill="rgb(242,130,45)" rx="2" ry="2" />
+<text text-anchor="" x="23.46" y="299.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >run(gevent.greenlet)</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>has_content(pika.spec) (50 samples, 0.37%)</title><rect x="469.9" y="81" width="4.3" height="15.0" fill="rgb(252,71,16)" rx="2" ry="2" />
+<text text-anchor="" x="472.88" y="91.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>rawlink(gevent.greenlet) (421 samples, 3.07%)</title><rect x="292.1" y="129" width="36.3" height="15.0" fill="rgb(252,39,40)" rx="2" ry="2" />
+<text text-anchor="" x="295.10" y="139.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >raw..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>(module)(__main__) (18 samples, 0.13%)</title><rect x="10.0" y="289" width="1.6" height="15.0" fill="rgb(223,185,41)" rx="2" ry="2" />
+<text text-anchor="" x="13.00" y="299.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_deliver_frame_to_channel(pika.connection) (4 samples, 0.03%)</title><rect x="959.4" y="113" width="0.3" height="15.0" fill="rgb(241,59,27)" rx="2" ry="2" />
+<text text-anchor="" x="962.38" y="123.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_trim_frame_buffer(pika.connection) (1,496 samples, 10.93%)</title><rect x="755.3" y="145" width="128.9" height="15.0" fill="rgb(231,20,18)" rx="2" ry="2" />
+<text text-anchor="" x="758.31" y="155.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_trim_frame_buff..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ready(pika.adapters.blocking_connection) (14 samples, 0.10%)</title><rect x="961.1" y="209" width="1.2" height="15.0" fill="rgb(244,78,48)" rx="2" ry="2" />
+<text text-anchor="" x="964.11" y="219.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_wait_core(gevent.event) (2 samples, 0.01%)</title><rect x="884.7" y="161" width="0.1" height="15.0" fill="rgb(237,60,9)" rx="2" ry="2" />
+<text text-anchor="" x="887.67" y="171.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>is_set(gevent.event) (11 samples, 0.08%)</title><rect x="1188.9" y="193" width="0.9" height="15.0" fill="rgb(216,117,53)" rx="2" ry="2" />
+<text text-anchor="" x="1191.88" y="203.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>is_ready(pika.adapters.blocking_connection) (11 samples, 0.08%)</title><rect x="927.2" y="209" width="1.0" height="15.0" fill="rgb(223,56,6)" rx="2" ry="2" />
+<text text-anchor="" x="930.24" y="219.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_append_frame_buffer(pika.connection) (6 samples, 0.04%)</title><rect x="355.3" y="145" width="0.5" height="15.0" fill="rgb(230,111,53)" rx="2" ry="2" />
+<text text-anchor="" x="358.27" y="155.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_on_data_available(pika.connection) (20 samples, 0.15%)</title><rect x="959.4" y="145" width="1.7" height="15.0" fill="rgb(218,158,22)" rx="2" ry="2" />
+<text text-anchor="" x="962.38" y="155.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>asynpush_consumer_callback(__main__) (2,801 samples, 20.46%)</title><rect x="96.0" y="209" width="241.4" height="15.0" fill="rgb(221,209,49)" rx="2" ry="2" />
+<text text-anchor="" x="99.04" y="219.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >asynpush_consumer_callback(__mai..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__init__(pika.frame) (376 samples, 2.75%)</title><rect x="641.5" y="113" width="32.4" height="15.0" fill="rgb(211,56,35)" rx="2" ry="2" />
+<text text-anchor="" x="644.47" y="123.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >__..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_handle_read(pika.adapters.base_connection) (20 samples, 0.15%)</title><rect x="959.4" y="161" width="1.7" height="15.0" fill="rgb(244,78,47)" rx="2" ry="2" />
+<text text-anchor="" x="962.38" y="171.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>channel(pika.adapters.blocking_connection) (4 samples, 0.03%)</title><rect x="10.5" y="257" width="0.4" height="15.0" fill="rgb(228,79,2)" rx="2" ry="2" />
+<text text-anchor="" x="13.52" y="267.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_read_frame(pika.connection) (2,143 samples, 15.65%)</title><rect x="570.6" y="145" width="184.7" height="15.0" fill="rgb(211,81,47)" rx="2" ry="2" />
+<text text-anchor="" x="573.63" y="155.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_read_frame(pika.connect..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__get__(gevent._util) (108 samples, 0.79%)</title><rect x="297.2" y="113" width="9.3" height="15.0" fill="rgb(249,217,42)" rx="2" ry="2" />
+<text text-anchor="" x="300.18" y="123.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_wait(gevent.event) (572 samples, 4.18%)</title><rect x="133.3" y="161" width="49.3" height="15.0" fill="rgb(208,13,4)" rx="2" ry="2" />
+<text text-anchor="" x="136.27" y="171.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_wai..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_start_new_or_dummy(gevent.timeout) (23 samples, 0.17%)</title><rect x="150.9" y="129" width="2.0" height="15.0" fill="rgb(247,129,29)" rx="2" ry="2" />
+<text text-anchor="" x="153.94" y="139.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__start_cancelled_by_kill(gevent.greenlet) (46 samples, 0.34%)</title><rect x="317.5" y="81" width="4.0" height="15.0" fill="rgb(241,201,27)" rx="2" ry="2" />
+<text text-anchor="" x="320.52" y="91.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>validate_and_push(__main__) (2,730 samples, 19.94%)</title><rect x="884.9" y="273" width="235.3" height="15.0" fill="rgb(207,183,43)" rx="2" ry="2" />
+<text text-anchor="" x="887.92" y="283.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >validate_and_push(__main__)</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>decode(pika.spec) (4 samples, 0.03%)</title><rect x="960.3" y="97" width="0.4" height="15.0" fill="rgb(239,115,51)" rx="2" ry="2" />
+<text text-anchor="" x="963.33" y="107.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>poll(pika.adapters.select_connection) (6,349 samples, 46.37%)</title><rect x="337.7" y="225" width="547.1" height="15.0" fill="rgb(207,100,31)" rx="2" ry="2" />
+<text text-anchor="" x="340.69" y="235.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >poll(pika.adapters.select_connection)</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>is_closed(pika.connection) (42 samples, 0.31%)</title><rect x="1065.0" y="177" width="3.6" height="15.0" fill="rgb(243,48,19)" rx="2" ry="2" />
+<text text-anchor="" x="1067.95" y="187.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>decode_short_string(pika.data) (217 samples, 1.58%)</title><rect x="736.6" y="97" width="18.7" height="15.0" fill="rgb(236,183,21)" rx="2" ry="2" />
+<text text-anchor="" x="739.61" y="107.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__init__(pika.frame) (47 samples, 0.34%)</title><rect x="1012.8" y="177" width="4.1" height="15.0" fill="rgb(250,100,6)" rx="2" ry="2" />
+<text text-anchor="" x="1015.82" y="187.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_manage_event_state(pika.adapters.base_connection) (55 samples, 0.40%)</title><rect x="1060.2" y="161" width="4.8" height="15.0" fill="rgb(220,19,48)" rx="2" ry="2" />
+<text text-anchor="" x="1063.21" y="171.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_has_links(gevent.greenlet) (44 samples, 0.32%)</title><rect x="66.1" y="257" width="3.8" height="15.0" fill="rgb(216,146,35)" rx="2" ry="2" />
+<text text-anchor="" x="69.13" y="267.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>poll(pika.adapters.select_connection) (20 samples, 0.15%)</title><rect x="959.4" y="209" width="1.7" height="15.0" fill="rgb(235,57,21)" rx="2" ry="2" />
+<text text-anchor="" x="962.38" y="219.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>raw_decode(json.decoder) (358 samples, 2.61%)</title><rect x="211.3" y="161" width="30.8" height="15.0" fill="rgb(215,109,7)" rx="2" ry="2" />
+<text text-anchor="" x="214.26" y="171.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >ra..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>basic_ack(pika.adapters.blocking_connection) (2,442 samples, 17.83%)</title><rect x="909.7" y="257" width="210.5" height="15.0" fill="rgb(227,72,4)" rx="2" ry="2" />
+<text text-anchor="" x="912.74" y="267.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >basic_ack(pika.adapters.blo..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>process(pika.channel) (2 samples, 0.01%)</title><rect x="959.6" y="81" width="0.1" height="15.0" fill="rgb(216,4,33)" rx="2" ry="2" />
+<text text-anchor="" x="962.56" y="91.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_handle_events(pika.adapters.base_connection) (6,339 samples, 46.30%)</title><rect x="338.0" y="193" width="546.3" height="15.0" fill="rgb(230,1,12)" rx="2" ry="2" />
+<text text-anchor="" x="341.03" y="203.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_handle_events(pika.adapters.base_connection)</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>process(pika.callback) (2 samples, 0.01%)</title><rect x="10.3" y="65" width="0.1" height="15.0" fill="rgb(225,21,19)" rx="2" ry="2" />
+<text text-anchor="" x="13.26" y="75.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_check_and_notify(gevent.event) (106 samples, 0.77%)</title><rect x="1180.7" y="209" width="9.1" height="15.0" fill="rgb(225,206,25)" rx="2" ry="2" />
+<text text-anchor="" x="1183.69" y="219.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>switch(gevent.hub) (222 samples, 1.62%)</title><rect x="158.8" y="129" width="19.1" height="15.0" fill="rgb(226,229,13)" rx="2" ry="2" />
+<text text-anchor="" x="161.78" y="139.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>basic_ack(pika.channel) (1,792 samples, 13.09%)</title><rect x="965.8" y="241" width="154.4" height="15.0" fill="rgb(226,82,11)" rx="2" ry="2" />
+<text text-anchor="" x="968.76" y="251.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >basic_ack(pika.chan..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_is_method_frame(pika.connection) (125 samples, 0.91%)</title><rect x="559.9" y="113" width="10.7" height="15.0" fill="rgb(213,176,6)" rx="2" ry="2" />
+<text text-anchor="" x="562.86" y="123.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>marshal(pika.frame) (553 samples, 4.04%)</title><rect x="1068.6" y="177" width="47.6" height="15.0" fill="rgb(244,163,35)" rx="2" ry="2" />
+<text text-anchor="" x="1071.57" y="187.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >mars..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>serve_forever(SocketServer) (2 samples, 0.01%)</title><rect x="73.1" y="225" width="0.2" height="15.0" fill="rgb(244,86,13)" rx="2" ry="2" />
+<text text-anchor="" x="76.12" y="235.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__init__(pika.adapters.blocking_connection) (51 samples, 0.37%)</title><rect x="418.1" y="65" width="4.4" height="15.0" fill="rgb(205,139,4)" rx="2" ry="2" />
+<text text-anchor="" x="421.09" y="75.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>process_data_events(pika.adapters.blocking_connection) (9,418 samples, 68.78%)</title><rect x="73.3" y="257" width="811.6" height="15.0" fill="rgb(215,39,45)" rx="2" ry="2" />
+<text text-anchor="" x="76.29" y="267.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >process_data_events(pika.adapters.blocking_connection)</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_handle_read(pika.adapters.base_connection) (4 samples, 0.03%)</title><rect x="10.1" y="161" width="0.3" height="15.0" fill="rgb(253,100,30)" rx="2" ry="2" />
+<text text-anchor="" x="13.09" y="171.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>run(profiler_online) (2 samples, 0.01%)</title><rect x="73.1" y="257" width="0.2" height="15.0" fill="rgb(246,133,0)" rx="2" ry="2" />
+<text text-anchor="" x="76.12" y="267.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>name_or_value(pika.callback) (526 samples, 3.84%)</title><rect x="510.0" y="81" width="45.4" height="15.0" fill="rgb(253,191,48)" rx="2" ry="2" />
+<text text-anchor="" x="513.04" y="91.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >name..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_flush_output(pika.adapters.blocking_connection) (2 samples, 0.01%)</title><rect x="11.0" y="225" width="0.2" height="15.0" fill="rgb(224,16,41)" rx="2" ry="2" />
+<text text-anchor="" x="14.03" y="235.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_send_connection_open(pika.connection) (2 samples, 0.01%)</title><rect x="10.3" y="33" width="0.1" height="15.0" fill="rgb(244,129,35)" rx="2" ry="2" />
+<text text-anchor="" x="13.26" y="43.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_notify_links(gevent.event) (328 samples, 2.40%)</title><rect x="1120.4" y="273" width="28.2" height="15.0" fill="rgb(222,15,42)" rx="2" ry="2" />
+<text text-anchor="" x="1123.37" y="283.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_process_fd_events(pika.adapters.select_connection) (4 samples, 0.03%)</title><rect x="10.1" y="193" width="0.3" height="15.0" fill="rgb(222,164,43)" rx="2" ry="2" />
+<text text-anchor="" x="13.09" y="203.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_flush_output(pika.adapters.blocking_connection) (2 samples, 0.01%)</title><rect x="11.0" y="241" width="0.2" height="15.0" fill="rgb(254,177,47)" rx="2" ry="2" />
+<text text-anchor="" x="14.03" y="251.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_flush_output(pika.adapters.blocking_connection) (2 samples, 0.01%)</title><rect x="11.2" y="241" width="0.2" height="15.0" fill="rgb(233,5,48)" rx="2" ry="2" />
+<text text-anchor="" x="14.21" y="251.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__init__(pika.frame) (220 samples, 1.61%)</title><rect x="654.9" y="97" width="19.0" height="15.0" fill="rgb(226,105,26)" rx="2" ry="2" />
+<text text-anchor="" x="657.91" y="107.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>is_closed(pika.channel) (40 samples, 0.29%)</title><rect x="962.3" y="225" width="3.5" height="15.0" fill="rgb(240,53,39)" rx="2" ry="2" />
+<text text-anchor="" x="965.31" y="235.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>process(pika.channel) (446 samples, 3.26%)</title><rect x="435.8" y="97" width="38.4" height="15.0" fill="rgb(215,146,6)" rx="2" ry="2" />
+<text text-anchor="" x="438.76" y="107.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >pro..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_on_deliver(pika.channel) (374 samples, 2.73%)</title><rect x="403.5" y="97" width="32.3" height="15.0" fill="rgb(208,188,25)" rx="2" ry="2" />
+<text text-anchor="" x="406.53" y="107.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_o..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_finish(pika.channel) (117 samples, 0.85%)</title><rect x="459.8" y="65" width="10.1" height="15.0" fill="rgb(209,116,26)" rx="2" ry="2" />
+<text text-anchor="" x="462.80" y="75.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_process_callbacks(pika.connection) (1,119 samples, 8.17%)</title><rect x="474.2" y="129" width="96.4" height="15.0" fill="rgb(222,88,2)" rx="2" ry="2" />
+<text text-anchor="" x="477.19" y="139.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_process_ca..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>connect(rbmq) (17 samples, 0.12%)</title><rect x="10.0" y="273" width="1.5" height="15.0" fill="rgb(239,156,46)" rx="2" ry="2" />
+<text text-anchor="" x="13.00" y="283.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_flush_output(pika.adapters.blocking_connection) (2 samples, 0.01%)</title><rect x="11.2" y="225" width="0.2" height="15.0" fill="rgb(206,99,38)" rx="2" ry="2" />
+<text text-anchor="" x="14.21" y="235.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_request_channel_dispatch(pika.adapters.blocking_connection) (28 samples, 0.20%)</title><rect x="427.1" y="49" width="2.5" height="15.0" fill="rgb(242,138,8)" rx="2" ry="2" />
+<text text-anchor="" x="430.14" y="59.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_flush_output(pika.adapters.blocking_connection) (5 samples, 0.04%)</title><rect x="10.1" y="225" width="0.4" height="15.0" fill="rgb(231,96,26)" rx="2" ry="2" />
+<text text-anchor="" x="13.09" y="235.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>is_set(gevent.event) (7 samples, 0.05%)</title><rect x="158.2" y="97" width="0.6" height="15.0" fill="rgb(254,80,15)" rx="2" ry="2" />
+<text text-anchor="" x="161.17" y="107.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>rawlink(gevent.event) (61 samples, 0.45%)</title><rect x="153.5" y="129" width="5.3" height="15.0" fill="rgb(238,220,8)" rx="2" ry="2" />
+<text text-anchor="" x="156.52" y="139.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>throw(gevent.greenlet) (2 samples, 0.01%)</title><rect x="1189.8" y="273" width="0.2" height="15.0" fill="rgb(214,113,40)" rx="2" ry="2" />
+<text text-anchor="" x="1192.83" y="283.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>add(gevent.pool) (534 samples, 3.90%)</title><rect x="282.4" y="145" width="46.0" height="15.0" fill="rgb(223,106,41)" rx="2" ry="2" />
+<text text-anchor="" x="285.36" y="155.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >add(..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__bool__(pika.adapters.blocking_connection) (40 samples, 0.29%)</title><rect x="924.7" y="225" width="3.5" height="15.0" fill="rgb(254,45,42)" rx="2" ry="2" />
+<text text-anchor="" x="927.74" y="235.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_process_frame(pika.connection) (5 samples, 0.04%)</title><rect x="959.4" y="129" width="0.4" height="15.0" fill="rgb(214,40,1)" rx="2" ry="2" />
+<text text-anchor="" x="962.38" y="139.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_flush_output(pika.adapters.blocking_connection) (2 samples, 0.01%)</title><rect x="10.6" y="225" width="0.2" height="15.0" fill="rgb(206,52,16)" rx="2" ry="2" />
+<text text-anchor="" x="13.60" y="235.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_marshal(pika.frame) (179 samples, 1.31%)</title><rect x="1081.8" y="161" width="15.4" height="15.0" fill="rgb(223,25,9)" rx="2" ry="2" />
+<text text-anchor="" x="1084.76" y="171.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_dispatch_events(pika.adapters.blocking_connection) (3,064 samples, 22.38%)</title><rect x="73.4" y="225" width="264.0" height="15.0" fill="rgb(224,121,17)" rx="2" ry="2" />
+<text text-anchor="" x="76.37" y="235.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_dispatch_events(pika.adapters.bloc..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_dispatch_channel_events(pika.adapters.blocking_connection) (3,066 samples, 22.39%)</title><rect x="73.3" y="241" width="264.2" height="15.0" fill="rgb(220,185,26)" rx="2" ry="2" />
+<text text-anchor="" x="76.29" y="251.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_dispatch_channel_events(pika.adapt..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_wait_core(gevent.event) (505 samples, 3.69%)</title><rect x="137.8" y="145" width="43.6" height="15.0" fill="rgb(223,164,15)" rx="2" ry="2" />
+<text text-anchor="" x="140.84" y="155.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_wai..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>queue_bind(pika.adapters.blocking_connection) (2 samples, 0.01%)</title><rect x="11.2" y="257" width="0.2" height="15.0" fill="rgb(222,144,11)" rx="2" ry="2" />
+<text text-anchor="" x="14.21" y="267.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>pending(pika.callback) (52 samples, 0.38%)</title><rect x="555.4" y="81" width="4.5" height="15.0" fill="rgb(223,35,19)" rx="2" ry="2" />
+<text text-anchor="" x="558.37" y="91.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>encode(pika.spec) (221 samples, 1.61%)</title><rect x="1097.2" y="161" width="19.0" height="15.0" fill="rgb(224,118,4)" rx="2" ry="2" />
+<text text-anchor="" x="1100.18" y="171.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_flush_outbound(pika.adapters.base_connection) (402 samples, 2.94%)</title><rect x="1030.3" y="177" width="34.7" height="15.0" fill="rgb(243,202,38)" rx="2" ry="2" />
+<text text-anchor="" x="1033.31" y="187.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_f..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>set(gevent.event) (145 samples, 1.06%)</title><rect x="1177.3" y="225" width="12.5" height="15.0" fill="rgb(242,211,35)" rx="2" ry="2" />
+<text text-anchor="" x="1180.33" y="235.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>wrapper(pika.callback) (4 samples, 0.03%)</title><rect x="10.1" y="97" width="0.3" height="15.0" fill="rgb(253,135,54)" rx="2" ry="2" />
+<text text-anchor="" x="13.09" y="107.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>send(gevent._socket2) (151 samples, 1.10%)</title><rect x="1047.2" y="145" width="13.0" height="15.0" fill="rgb(207,71,6)" rx="2" ry="2" />
+<text text-anchor="" x="1050.20" y="155.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>serve_forever(werkzeug.serving) (2 samples, 0.01%)</title><rect x="73.1" y="241" width="0.2" height="15.0" fill="rgb(254,216,23)" rx="2" ry="2" />
+<text text-anchor="" x="76.12" y="251.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>run_worker(profiler_online) (2 samples, 0.01%)</title><rect x="73.1" y="273" width="0.2" height="15.0" fill="rgb(244,187,52)" rx="2" ry="2" />
+<text text-anchor="" x="76.12" y="283.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+</svg>
