@@ -13,16 +13,19 @@
 <p>2:线程安全！！！</p>
 <p>3:关于httpclient单例的问题，一旦这个httpclient出现异常了，这种写法就算加锁了 线程安全了，还是会初始化很多httpclient，只是不会导致内存泄漏罢了，我倾向的写法是初始化2-3个httpclient在一个循环队列中，不断的轮训这些client，一旦出现需要重新初始化的情况，置当前的client的状态为不可用，丢到一个线程处理，成功后再把使用状态激活。</p>
 <p>4：apcahe httpclient的代码好复杂，基于java的nio写的，如果能用上netty这种现成的轮子多舒服，也不用费劲的读httpclient 的ioloop的实现，而且发现一个http client所占用的资源非常多，不然内存也不会因为频繁的初始化就暴涨，看了下主要是在CPool这个类，这个是一个http的连接池，根据dump的结果算了下，吃的内存在30～70m</p>
-</div></div><div class="post-main post-comment"><div data-thread-key="2017/01/06/httpclient-mem-leak/" data-title="apache httpclient 多线程重置导致内存泄漏" data-url="http://chellynov.github.io/2017/01/06/httpclient-mem-leak/" class="ds-thread"></div><script>var duoshuoQuery = {short_name:'novchelly'};
+</div></div><div class="post-main post-comment"><div id="disqus_thread"></div><script type="text/javascript">
+var disqus_shortname = 'yihuangcaia';
+var disqus_identifier = '2017/01/06/httpclient-mem-leak/';
+var disqus_title = 'apache httpclient 多线程重置导致内存泄漏';
+var disqus_url = 'http://chellynov.github.io/2017/01/06/httpclient-mem-leak/';
 (function() {
-    var ds = document.createElement('script');
-    ds.type = 'text/javascript';ds.async = true;
-    ds.src = (document.location.protocol == 'https:' ? 'https:' : 'http:') + '//static.duoshuo.com/embed.js';
-    ds.charset = 'UTF-8';
-    (document.getElementsByTagName('head')[0]
-        || document.getElementsByTagName('body')[0]).appendChild(ds);
+   var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+   dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+   (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
 })();
-</script></div></article><link rel="stylesheet" type="text/css" href="//cdn.bootcss.com/fancybox/2.1.5/jquery.fancybox.css"><script src="//cdn.bootcss.com/jquery/2.0.3/jquery.min.js"></script><script src="//cdn.bootcss.com/fancybox/2.1.5/jquery.fancybox.pack.js"></script><script>$(document).ready(function() {
+</script>
+<noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+<a href="http://disqus.com" class="dsq-brlink">Blog comments powered by <span class="logo-disqus">Disqus</span></a></div></article><link rel="stylesheet" type="text/css" href="//cdn.bootcss.com/fancybox/2.1.5/jquery.fancybox.css"><script src="//cdn.bootcss.com/jquery/2.0.3/jquery.min.js"></script><script src="//cdn.bootcss.com/fancybox/2.1.5/jquery.fancybox.pack.js"></script><script>$(document).ready(function() {
     $(".fancybox").fancybox();
 });
 </script></body></html>

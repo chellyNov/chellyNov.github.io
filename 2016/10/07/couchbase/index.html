@@ -12,16 +12,19 @@
 <p><img src="/image/couchbase.jpg" alt=""></p>
 <p>所以这个问题是各个sdk行为不一致引起的，所以解决方法就是删掉那段校验的代码，重新打包就可以了</p>
 <h3 id="备注：关于部分sdk的行为"><a href="#备注：关于部分sdk的行为" class="headerlink" title="备注：关于部分sdk的行为"></a>备注：关于部分sdk的行为</h3><p>c sdk的请求flags为0，也就是没有设置，get response也不校验flags的请求，所以无报错<br>python sdk add请求有设置flags的，get response不校验flags，所以也无报错<br>java sdk add 请求有设置flags， get response强校验flags，所以解析失败</p>
-</div></div><div class="post-main post-comment"><div data-thread-key="2016/10/07/couchbase/" data-title="Couchbase java client 解析binary doc失败" data-url="http://chellynov.github.io/2016/10/07/couchbase/" class="ds-thread"></div><script>var duoshuoQuery = {short_name:'novchelly'};
+</div></div><div class="post-main post-comment"><div id="disqus_thread"></div><script type="text/javascript">
+var disqus_shortname = 'yihuangcaia';
+var disqus_identifier = '2016/10/07/couchbase/';
+var disqus_title = 'Couchbase java client 解析binary doc失败';
+var disqus_url = 'http://chellynov.github.io/2016/10/07/couchbase/';
 (function() {
-    var ds = document.createElement('script');
-    ds.type = 'text/javascript';ds.async = true;
-    ds.src = (document.location.protocol == 'https:' ? 'https:' : 'http:') + '//static.duoshuo.com/embed.js';
-    ds.charset = 'UTF-8';
-    (document.getElementsByTagName('head')[0]
-        || document.getElementsByTagName('body')[0]).appendChild(ds);
+   var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+   dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+   (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
 })();
-</script></div></article><link rel="stylesheet" type="text/css" href="//cdn.bootcss.com/fancybox/2.1.5/jquery.fancybox.css"><script src="//cdn.bootcss.com/jquery/2.0.3/jquery.min.js"></script><script src="//cdn.bootcss.com/fancybox/2.1.5/jquery.fancybox.pack.js"></script><script>$(document).ready(function() {
+</script>
+<noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+<a href="http://disqus.com" class="dsq-brlink">Blog comments powered by <span class="logo-disqus">Disqus</span></a></div></article><link rel="stylesheet" type="text/css" href="//cdn.bootcss.com/fancybox/2.1.5/jquery.fancybox.css"><script src="//cdn.bootcss.com/jquery/2.0.3/jquery.min.js"></script><script src="//cdn.bootcss.com/fancybox/2.1.5/jquery.fancybox.pack.js"></script><script>$(document).ready(function() {
     $(".fancybox").fancybox();
 });
 </script></body></html>

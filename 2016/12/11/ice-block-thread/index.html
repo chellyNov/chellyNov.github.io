@@ -5,16 +5,19 @@
 <p>1.ice client的请求默认是不超时的，使用堵塞调用的话，一旦超时，势必波及到其他业务的，所以把现有服务的堵塞查询都改成异步查。</p>
 <p>2.告警覆盖不全，dbagent的调用超时这部分都没加上相关的告警，一旦出问题也不能立马感知和排查，所以加了相关的超时告警覆盖</p>
 <p>3.关于告警的问题，之前只是小部分的在couchbase上加了告警，还有一些服务未知异常的告警，但是经过这次坎坷的定位之后，决定在对单个http请求的超时和调用其他服务的时候都加上相关的告警，比如说发送mq 消费 mq 查redis这些，一旦出现异常都把相关的信息发送出来，及时感知和定位。虽然是个繁杂的体力活，但是效果感人。</p>
-</div></div><div class="post-main post-comment"><div data-thread-key="2016/12/11/ice-block-thread/" data-title="记一次超时事故" data-url="http://chellynov.github.io/2016/12/11/ice-block-thread/" class="ds-thread"></div><script>var duoshuoQuery = {short_name:'novchelly'};
+</div></div><div class="post-main post-comment"><div id="disqus_thread"></div><script type="text/javascript">
+var disqus_shortname = 'yihuangcaia';
+var disqus_identifier = '2016/12/11/ice-block-thread/';
+var disqus_title = '记一次超时事故';
+var disqus_url = 'http://chellynov.github.io/2016/12/11/ice-block-thread/';
 (function() {
-    var ds = document.createElement('script');
-    ds.type = 'text/javascript';ds.async = true;
-    ds.src = (document.location.protocol == 'https:' ? 'https:' : 'http:') + '//static.duoshuo.com/embed.js';
-    ds.charset = 'UTF-8';
-    (document.getElementsByTagName('head')[0]
-        || document.getElementsByTagName('body')[0]).appendChild(ds);
+   var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+   dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+   (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
 })();
-</script></div></article><link rel="stylesheet" type="text/css" href="//cdn.bootcss.com/fancybox/2.1.5/jquery.fancybox.css"><script src="//cdn.bootcss.com/jquery/2.0.3/jquery.min.js"></script><script src="//cdn.bootcss.com/fancybox/2.1.5/jquery.fancybox.pack.js"></script><script>$(document).ready(function() {
+</script>
+<noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+<a href="http://disqus.com" class="dsq-brlink">Blog comments powered by <span class="logo-disqus">Disqus</span></a></div></article><link rel="stylesheet" type="text/css" href="//cdn.bootcss.com/fancybox/2.1.5/jquery.fancybox.css"><script src="//cdn.bootcss.com/jquery/2.0.3/jquery.min.js"></script><script src="//cdn.bootcss.com/fancybox/2.1.5/jquery.fancybox.pack.js"></script><script>$(document).ready(function() {
     $(".fancybox").fancybox();
 });
 </script></body></html>
