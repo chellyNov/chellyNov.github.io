@@ -5,9 +5,9 @@
 <h3 id="埋坑"><a href="#埋坑" class="headerlink" title="埋坑"></a>埋坑</h3><p>向运维申请了一个3个节点的couchbase集群，版本4.6.2,运行了用2.4.5版本的服务后， 手动把其中一个节点的进程fail over掉，发现一切正常，恢复后杀掉进程，也是一切正常。初步估计是和couchbase server版本有关。恰巧要去客户那里出差解决问题，于是出差期间在客户的环境tcpdump了出错版本的包和正常运行版本的包。客户的couchbase server版本是4.1.1</p>
 <h3 id="抓包结果"><a href="#抓包结果" class="headerlink" title="抓包结果"></a>抓包结果</h3><p>couchbase java sdk 2.2.6 正常运行,可以看到hello request后立马返回一个hello resp,然后接下来会获取集群信息等的进一步操作</p>
 <p><img src="coucbaseok.png" alt=""></p>
-<p>coucbase java sdk 2.4.5 启动不了，无法正常工作，可以看到hello request后，服务端没有resp返回，所以客户端会重试的发hello到一定次数后就不再重试。</p>
+<p>coucbase java sdk 2.4.5 启动不了，无法正常工作，可以看到hello request后，服务端没有resp返回，所以客户端会重试的发hello到一定次数后就不再重试。所以下来的一系列初始化都不会进行了，客户端自然而然的不能工作了</p>
 <p><img src="couchbaseerr.png" alt=""></p>
-<p>仔细对比两个hello包，发现除了body 其他都一样，body又是填的sdk的信息，couchbase 又是闭源的，往下查下去有点麻烦，所以怎么办？ 把4.1.1升级到4.6.2～，</p>
+<p>仔细对比两个hello包，发现除了body 其他都一样，body又是填的sdk的信息，couchbase 又是闭源的，往下查下去有点麻烦，所以怎么办？ 把4.1.1升级到4.6.2～</p>
 </div></div><div class="post-main post-comment"><div id="disqus_thread"></div><script type="text/javascript">
 var disqus_shortname = 'yihuangcaia';
 var disqus_identifier = '2017/06/29/2017-06-29/';
