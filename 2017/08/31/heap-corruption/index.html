@@ -1,0 +1,24 @@
+<!DOCTYPE html><html><head><meta http-equiv="content-type" content="text/html; charset=utf-8"><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" name="viewport"><meta content="yes" name="apple-mobile-web-app-capable"><meta content="black-translucent" name="apple-mobile-web-app-status-bar-style"><meta content="telephone=no" name="format-detection"><meta name="description"><title>关于一次heap corruption问题定位 | 鱼塘...</title><link rel="stylesheet" type="text/css" href="/css/normalize.css"><link rel="stylesheet" type="text/css" href="/css/highlight.css"><link rel="stylesheet" type="text/css" href="/css/noise.css"><link rel="stylesheet" type="text/css" href="//cdn.bootcss.com/font-awesome/4.5.0/css/font-awesome.min.css"><link rel="Shortcut Icon" type="image/x-icon" href="/favicon.ico"></head><body><!-- gallery that comes before the header--><article class="wrapper"><div class="post-main"><div class="nav"><nav class="container"><a href="/" class="sidebar-nav-item active">Home</a><a href="/archives" class="sidebar-nav-item">Archives</a></nav><div class="container post-meta"><div class="post-time">2017-08-31</div></div></div><div class="post-header"><h1>关于一次heap corruption问题定位</h1></div><div class="container post-content"><p>最近在研究libco,打算把这用到新模块看能不能提升开发效率，改造访问mysql的模块真的是简单封装下就可以了。不过libco没有协程池之类的东西，这个协程管理起来比较麻烦，所以需要自己写个协程池节省下资源。调研的时候是libco + hredis-vip sync api，写起来真的无脑，但是一个协程要分配一个redisClusterContext, 一个redisClusterContext 最少也有一条连接，1000并发就至少要1000个连接，这种写法意外的可怕，而且对比了hiredis async的api，发现sync模式的api带来的开销也非常大，零散的read write请求会消耗client和server大量的cpu。所以尝试了合并多个请求到一个连接上面，这个改动一举多得，于是啃了hiredis vip的源码，尝试开始改动，中间过程省略….</p>
+<h2 id="问题"><a href="#问题" class="headerlink" title="问题"></a>问题</h2><figure class="highlight"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div></pre></td><td class="code"><pre><div class="line">(gdb) bt</div><div class="line">#0  0x00007f351a2fb4c2 in _int_malloc () from /lib64/libc.so.6</div><div class="line">#1  0x00007f351a2fdfbc in malloc () from /lib64/libc.so.6</div><div class="line">#2  0x00007f351b786898 in co_swap (curr=0x0, pending_co=0x1) at co_routine.cpp:599</div><div class="line">#3  0x00007f351b7869ae in co_swap (curr=0x11fa710, pending_co=0x12130d0) at co_routine.cpp:637</div><div class="line">#4  0x00007f351b78677d in co_yield_env (env=0x12130d0) at co_routine.cpp:566</div><div class="line">#5  0x00007f351b78773d in co_cond_signal (si=0x4126e0 &lt;_start&gt;) at co_routine.cpp:1080</div></pre></td></tr></table></figure>
+<p>malloc 里面Segmentation fault？ wtf ？ google了下 发现是heap corruption,引用<a href="https://blogs.msdn.microsoft.com/webdav_101/2010/06/22/detecting-heap-corruption-using-gflags-and-dumps/" target="_blank" rel="external">msdn</a></p>
+<blockquote>
+<p>This typically occurs when an application allocates a block of heap memory of a given size and then writes to memory addresses beyond the requested size of the heap block. Heap corruption can also occur when an application writes to block of memory that has already been freed.  </p>
+</blockquote>
+<p>free看了下内存发现足够的，所以就应该是使用了被free的内存了，由于我改动的只有几十行代码，于是不断的注释可疑代码然后运行，最后定位到了co_redisGetReply这个函数，发现只要加上这个函数，程序就会core，于是把相关的指针都printf出来，发现redisContext里面的fd突然为0了，初步怀疑是redisContext被free了，因为我还没做到free相关的东西，协程会一直跑的，所以往redisFree这个函数加了printf,果然发现在core之前这个redisContext已经被free了，然后又继续操作这块内存，等到malloc分配到这块内存的时候就core了。</p>
+<p>所以只需要free的时候把连接关联的协程也停止就可以了，这个与libco的使用姿势有关，又废了一番小小的功夫，改完之后简单压了下，合并请求的效果出来了，redis server在8wqps的时候 cpu比以前少了40%。不过各种异常处理还没做，离可用还有距离，坑还是有待填</p>
+</div></div><div class="post-main post-comment"><div id="disqus_thread"></div><script type="text/javascript">
+var disqus_shortname = 'yihuangcaia';
+var disqus_identifier = '2017/08/31/heap-corruption/';
+var disqus_title = '关于一次heap corruption问题定位';
+var disqus_url = 'http://chellynov.github.io/2017/08/31/heap-corruption/';
+(function() {
+   var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+   dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+   (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+<a href="http://disqus.com" class="dsq-brlink">Blog comments powered by <span class="logo-disqus">Disqus</span></a></div></article><link rel="stylesheet" type="text/css" href="//cdn.bootcss.com/fancybox/2.1.5/jquery.fancybox.css"><script src="//cdn.bootcss.com/jquery/2.0.3/jquery.min.js"></script><script src="//cdn.bootcss.com/fancybox/2.1.5/jquery.fancybox.pack.js"></script><script>$(document).ready(function() {
+    $(".fancybox").fancybox();
+});
+</script></body></html>
