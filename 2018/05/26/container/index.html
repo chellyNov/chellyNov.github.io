@@ -28,6 +28,7 @@
 <h3 id="cgroup-namespace能做到资源使用和可视化的隔离"><a href="#cgroup-namespace能做到资源使用和可视化的隔离" class="headerlink" title="cgroup + namespace能做到资源使用和可视化的隔离"></a>cgroup + namespace能做到资源使用和可视化的隔离</h3><p>但是由于cgroup namepace的不完善，不能做到进程所使用的资源完全的隔离，如devcie procfs的隔离，磁盘使用容量的隔离</p>
 <h3 id="容器镜像"><a href="#容器镜像" class="headerlink" title="容器镜像"></a>容器镜像</h3><p>如果每个镜像都独立的话，如一个centos jdk8的镜像要250M,那么容器所占用的磁盘资源是非常大的，所以docker 镜像采用Union Filesystem，减少容器占用的磁盘空间，union filesystem能把几个独立的文件夹联合起来，挂载到一个目录下，提供cow机制，对于未修改的文件，多个镜像共用，修改的文件单独复制到自己的文件目录下并修改，改善了镜像磁盘的资源占用</p>
 <h3 id="others"><a href="#others" class="headerlink" title="others"></a>others</h3><p>现在容器貌似是个大潮流，但是由于naespace + cgroup的不成熟服务容器化的坑远比vm上的多得多，一旦决定容器话，必须要有做好踩坑的准备。<br>我觉得容器能带来的最大的好处是强力的扩缩容的能力，以及搭配k8带来的的服务编排能力。是不是一定要上容器还是要看这两点，毕竟容器还不完善，盲目的容器化会付出代价的</p>
+<h3 id="参考"><a href="#参考" class="headerlink" title="参考"></a>参考</h3><p>邱模炯：Container虚拟化技术内核原理<br><a href="https://tech.meituan.com/cgroups.html" target="_blank" rel="external">https://tech.meituan.com/cgroups.html</a></p>
 </div></div><div class="post-main post-comment"><div id="disqus_thread"></div><script type="text/javascript">
 var disqus_shortname = 'yihuangcaia';
 var disqus_identifier = '2018/05/26/container/';
