@@ -2,7 +2,7 @@
 <h3 id="cpu核数获取"><a href="#cpu核数获取" class="headerlink" title="cpu核数获取"></a>cpu核数获取</h3><p>很多情况下我们会用根据cpu核数设置线程数，最后调用的一般都是<code>sysconf(_SC_NPROCESSORS_CONF)</code> / <code>get_nprocs(void)</code> / <code>get_nprocs_conf(void)</code> 等系统调用，最后这些系统调用基本是从 <code>/sys/devices/system/cpu</code>、<code>/sys/devices/system/cpu/online</code> 这两个地方获取到系统核数。</p>
 <p>docker 并没有虚拟化 <code>/sys</code> 目录，所以在 docker 里面读到的数据是宿主系统的核数。</p>
 <p>因为这些数据都是以文件的形式存的，所以可以通过 <code>fuse</code> hook 对此类文件的 <code>read()</code> 调用，通过 <code>cgroup</code> 计算出实际分配给 docker 的核数并返回。</p>
-<h3 id="内存"><a href="#内存" class="headerlink" title="内存"></a>内存</h3><p> 内存通过 <code>sysconf(_SC_PHYS_PAGES)</code> 或者 <code>sysinfo</code> 的方法获取的数据是从内存获取的，所以没法通过 <code>fuse</code> hook 读写的。c 的话建议从<code>/proc/memory</code> 之类的地方获取。java的话，只能设置 jvm 堆大小解决这个问题，不然 jvm 会因为根据宿主系统内存扩大自己的内存，超过 docker 限制后会被 docker 杀掉。</p>
+<h3 id="内存"><a href="#内存" class="headerlink" title="内存"></a>内存</h3><p> 内存通过 <code>sysconf(_SC_PHYS_PAGES)</code> 或者 <code>sysinfo</code> 的方法获取的数据是从内存获取的，所以没法通过 <code>fuse</code> hook 读写的。但是可以通过劫持<code>sysinfo</code>和<code>sysconf</code>等系统调用实现，不然 jvm 会因为根据宿主系统内存扩大自己的内存，超过 docker 限制后会被 docker 杀掉。</p>
 <h3 id="宿主机系统与容器内部的用户权限"><a href="#宿主机系统与容器内部的用户权限" class="headerlink" title="宿主机系统与容器内部的用户权限"></a>宿主机系统与容器内部的用户权限</h3><p>Linux 内核负责管理 uid 和 gid，内核级系统调用时，用于确定是否授予该请求权限。例如当进程尝试写入文件时，内核会检查创建进程的 uid 和 gid，以确定它是否有足够的权限来修改文件。此时没有使用用户名，使用了uid。</p>
 <p>当在服务器上运行 Docker 容器时，仍然使用同一个内核内核，uids 和 gids 都由单个内核控制。</p>
 <p>linux 中显示的用户名（和组名）不是内核的一部分，而是由外部工具 <code>/etc/passwd</code>、<code>ldap</code>、<code>kerberos</code> 等管理的。所以实际用用户名去授权的话，并不能在宿主机和容器通用。</p>
